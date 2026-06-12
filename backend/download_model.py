@@ -1,4 +1,4 @@
-ximport os
+import os
 import urllib.request
 import urllib.error
 import socket

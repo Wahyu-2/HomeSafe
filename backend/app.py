@@ -1,6 +1,7 @@
 import os
 import time
 import base64
+import asyncio
 import logging
 import cv2
 import numpy as np
@@ -25,6 +26,9 @@ app.add_middleware(
 
 engine = FaceRecognizerEngine()
 
+# WebSocket connection timeout (seconds) — reset on each received frame
+WS_TIMEOUT = 30
+
 
 def decode_frame(img_data_b64: str):
     _, encoded = img_data_b64.split(",", 1) if "," in img_data_b64 else ("", img_data_b64)
@@ -37,11 +41,35 @@ def decode_frame(img_data_b64: str):
 @app.websocket("/ws")
 async def websocket_recognition(websocket: WebSocket):
     await websocket.accept()
+    last_activity = time.time()
+    
+    async def send_keepalive():
+        """Send periodic ping to keep connection alive."""
+        while True:
+            await asyncio.sleep(10)  # every 10 seconds
+            try:
+                # If no frame received for a while, send a keepalive ping
+                if time.time() - last_activity > 5:
+                    await websocket.send_json({"type": "ping"})
+            except Exception:
+                break
+
+    # Start keepalive task
+    keepalive_task = asyncio.create_task(send_keepalive())
+
     try:
         while True:
             data = await websocket.receive_json()
+            
+            # Handle pong from client
+            if data.get("type") == "pong":
+                continue
+                
             if data.get("type") != "frame":
                 continue
+
+            # Reset activity timer
+            last_activity = time.time()
 
             frame = decode_frame(data.get("image", ""))
             if frame is None:
@@ -81,6 +109,8 @@ async def websocket_recognition(websocket: WebSocket):
         logger.info("Recognition WS disconnected")
     except Exception as e:
         logger.error(f"Recognition WS error: {e}", exc_info=True)
+    finally:
+        keepalive_task.cancel()
 
 
 # ── Enrollment WebSocket ───────────────────────────────────────────────────────

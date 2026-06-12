@@ -144,11 +144,22 @@ const canvas    = document.getElementById('overlay-canvas');
 const ctx       = canvas.getContext('2d');
 
 let ws = null;
+let reconnectTimer = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_DELAY = 15000; // 15 seconds max
 
 function connectWebSocket() {
+    // Clear any pending reconnect
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+
     ws = new WebSocket(WS_URL);
+    ws.binaryType = 'arraybuffer'; // for better stability
 
     ws.onopen = () => {
+        reconnectAttempts = 0;
         document.getElementById('recognition-status').className = 'px-2 py-1 text-xs rounded bg-green-600';
         document.getElementById('recognition-status').innerHTML = '<i class="fas fa-circle mr-1"></i>Connected';
         startCamera();
@@ -158,19 +169,32 @@ function connectWebSocket() {
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
 
+        // Handle keepalive ping from server
+        if (data.type === 'ping') {
+            ws.send(JSON.stringify({ type: 'pong' }));
+            return;
+        }
+
         if (data.type === 'result') {
             updateRecognitionUI(data);
         }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
         document.getElementById('recognition-status').className = 'px-2 py-1 text-xs rounded bg-red-600';
         document.getElementById('recognition-status').innerHTML = '<i class="fas fa-times mr-1"></i>Disconnected';
-        setTimeout(connectWebSocket, 3000);
+
+        // Exponential backoff for reconnect
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), MAX_RECONNECT_DELAY);
+        console.log(`Reconnecting in ${Math.round(delay/1000)}s (attempt ${reconnectAttempts})...`);
+        
+        reconnectTimer = setTimeout(connectWebSocket, delay);
     };
 
     ws.onerror = (err) => {
         console.error('WebSocket error:', err);
+        // onclose will be called after onerror, so reconnect happens there
     };
 }
 
