@@ -25,4 +25,5 @@ __pycache__/
 *$py.class
 *.so
 backend/mediapipe-env/
-backend/__pycache__/
+backend/__pycache__/Master/  
+gcm-diagnose.log 
